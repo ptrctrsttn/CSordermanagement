@@ -1,0 +1,10 @@
+{
+  "name": "websocket-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/websocket-server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.websocket.json",
+    "start": "node --experimental-specifier-resolution=node dist/websocket-server.js"
+  }
+} 

@@ -1,9 +1,12 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import express from 'express';
 import cors from 'cors';
-import fetch from 'node-fetch';
 import fs from 'fs';
 import path from 'path';
+let orders = [];
+let drivers = [];
+let productList = [];
+const clients = new Set();
 const app = express();
 const port = process.env.PORT || 3001;
 app.use(cors());
@@ -25,19 +28,20 @@ const loadOrders = () => {
             orders = JSON.parse(data);
             console.log('Orders loaded from file');
         }
+        else {
+            console.log('No existing orders file found');
+            orders = [];
+        }
     }
     catch (error) {
         console.error('Error loading orders:', error);
+        orders = [];
     }
 };
 loadOrders();
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const START_ADDRESS = "562 richmond road grey lynn";
 const UPDATE_INTERVAL = 60 * 60 * 1000;
-let orders = [];
-let drivers = [];
-let productList = [];
-const clients = new Set();
 let updateIntervalRef;
 const parseAddress = (addressString) => {
     try {
@@ -84,8 +88,8 @@ const calculateDispatchTime = (deliveryTime, travelTime) => {
     return new Date(delivery.getTime() - (travelMinutes * 60 * 1000)).toISOString();
 };
 const updateAllTravelTimes = async () => {
-    var _a, _b, _c, _d, _e;
     const updatedTimes = {};
+    const fetch = (await import('node-fetch')).default;
     for (const order of orders) {
         if (order.isManualTravelTime) {
             continue;
@@ -101,14 +105,18 @@ const updateAllTravelTimes = async () => {
                 continue;
             }
             const data = await response.json();
-            if (((_d = (_c = (_b = (_a = data === null || data === void 0 ? void 0 : data.rows) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.elements) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.status) === 'OK' && ((_e = data.rows[0].elements[0].duration) === null || _e === void 0 ? void 0 : _e.text)) {
+            if (data?.rows?.[0]?.elements?.[0]?.status === 'OK' && data.rows[0].elements[0].duration?.text) {
                 const duration = data.rows[0].elements[0].duration.text;
                 const minutes = parseInt(duration.split(' ')[0]);
                 if (!isNaN(minutes)) {
                     updatedTimes[order.id] = minutes;
                     const orderIndex = orders.findIndex(o => o.id === order.id);
                     if (orderIndex !== -1) {
-                        orders[orderIndex] = Object.assign(Object.assign({}, orders[orderIndex]), { travelTime: minutes, dispatchTime: calculateDispatchTime(orders[orderIndex].deliveryTime, minutes) });
+                        orders[orderIndex] = {
+                            ...orders[orderIndex],
+                            travelTime: minutes,
+                            dispatchTime: calculateDispatchTime(orders[orderIndex].deliveryTime, minutes)
+                        };
                     }
                 }
             }
@@ -137,39 +145,37 @@ console.log('WebSocket server starting on port 3002...');
 wss.on('connection', (ws) => {
     console.log('Client connected to WebSocket server');
     clients.add(ws);
-    const initialMessage = JSON.stringify({
+    const initialData = JSON.stringify({
         type: 'INITIAL_DATA',
-        orders: orders
+        orders: orders,
+        drivers: drivers,
+        productList: productList
     });
-    ws.send(initialMessage);
+    ws.send(initialData);
     ws.on('message', async (message) => {
-        console.log('Received message:', message.toString());
         try {
             const data = JSON.parse(message.toString());
-            switch (data.type) {
-                case 'ORDER_UPDATE':
-                    const { orderId, updates } = data;
-                    console.log('Processing order update for:', orderId, updates);
-                    const orderIndex = orders.findIndex(o => o.id === orderId);
-                    if (orderIndex !== -1) {
-                        const updatedOrder = Object.assign(Object.assign({}, orders[orderIndex]), { isDispatched: updates === null || updates === void 0 ? void 0 : updates.isDispatched });
-                        if (updates === null || updates === void 0 ? void 0 : updates.dispatchTime) {
-                            updatedOrder.dispatchTime = updates.dispatchTime;
+            console.log('Received message:', data);
+            if (data.type === 'ORDER_UPDATE') {
+                const { orderId, updates } = data;
+                console.log('Processing order update for:', orderId, updates);
+                const orderIndex = orders.findIndex(o => o.id === orderId);
+                if (orderIndex !== -1) {
+                    orders[orderIndex] = {
+                        ...orders[orderIndex],
+                        ...updates
+                    };
+                    saveOrders();
+                    const updateMessage = JSON.stringify({
+                        type: 'ORDER_UPDATE',
+                        order: orders[orderIndex]
+                    });
+                    clients.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN) {
+                            client.send(updateMessage);
                         }
-                        orders[orderIndex] = updatedOrder;
-                        saveOrders();
-                        const updateMessage = JSON.stringify({
-                            type: 'ORDER_UPDATE',
-                            orderId: orderId,
-                            updates: updatedOrder
-                        });
-                        clients.forEach(client => {
-                            if (client.readyState === WebSocket.OPEN) {
-                                client.send(updateMessage);
-                            }
-                        });
-                    }
-                    break;
+                    });
+                }
             }
         }
         catch (error) {
@@ -192,5 +198,12 @@ wss.on('close', () => {
     if (updateIntervalRef) {
         clearInterval(updateIntervalRef);
     }
+});
+process.on('SIGINT', () => {
+    console.log('Shutting down WebSocket server...');
+    wss.close(() => {
+        console.log('WebSocket server closed');
+        process.exit(0);
+    });
 });
 //# sourceMappingURL=websocket-server.js.map

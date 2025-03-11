@@ -3,15 +3,23 @@ import express from 'express';
 import cors from 'cors';
 import { format } from 'date-fns';
 import { Request, Response } from 'express';
-import fetch from 'node-fetch';
 import fs from 'fs';
 import path from 'path';
+import fetch from 'node-fetch';
 
-const app = express()
-const port = process.env.PORT || 3001
+// Store orders in memory
+let orders: Order[] = [];
+let drivers: Driver[] = [];
+let productList: ProductList[] = [];
 
-app.use(cors())
-app.use(express.json())
+// Store WebSocket clients
+const clients = new Set<WebSocket>();
+
+const app = express();
+const port = process.env.PORT || 3001;
+
+app.use(cors());
+app.use(express.json());
 
 // File path for persisting orders
 const ORDERS_FILE = path.join(process.cwd(), 'orders.json');
@@ -21,7 +29,7 @@ const saveOrders = () => {
   try {
     fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2));
     console.log('Orders saved to file');
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error saving orders:', error);
   }
 };
@@ -33,9 +41,13 @@ const loadOrders = () => {
       const data = fs.readFileSync(ORDERS_FILE, 'utf8');
       orders = JSON.parse(data);
       console.log('Orders loaded from file');
+    } else {
+      console.log('No existing orders file found');
+      orders = [];
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error loading orders:', error);
+    orders = [];
   }
 };
 
@@ -121,14 +133,6 @@ const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 const START_ADDRESS = "562 richmond road grey lynn"
 const UPDATE_INTERVAL = 60 * 60 * 1000 // 1 hour in milliseconds
 
-// Store orders in memory
-let orders: Order[] = []
-let drivers: Driver[] = []
-let productList: ProductList[] = []
-
-// Store WebSocket clients
-const clients = new Set<WebSocket>()
-
 // Store the update interval reference
 let updateIntervalRef: NodeJS.Timeout;
 
@@ -181,6 +185,7 @@ const calculateDispatchTime = (deliveryTime: string | null, travelTime: number |
 
 const updateAllTravelTimes = async () => {
   const updatedTimes: { [key: string]: number } = {};
+  const fetch = (await import('node-fetch')).default;
   
   for (const order of orders) {
     // Skip orders with manually set travel times
@@ -255,55 +260,47 @@ wss.on('connection', (ws: WebSocket) => {
   console.log('Client connected to WebSocket server');
   clients.add(ws);
 
-  // Send initial orders to the new client
-  const initialMessage = JSON.stringify({
+  // Send initial data to client
+  const initialData = JSON.stringify({
     type: 'INITIAL_DATA',
-    orders: orders
+    orders: orders,
+    drivers: drivers,
+    productList: productList
   });
-  ws.send(initialMessage);
+  ws.send(initialData);
 
   ws.on('message', async (message: string) => {
-    console.log('Received message:', message.toString());
     try {
-      const data = JSON.parse(message.toString()) as { type: string; orderId?: string; updates?: Partial<Order> };
+      const data = JSON.parse(message.toString());
+      console.log('Received message:', data);
 
-      switch (data.type) {
-        case 'ORDER_UPDATE':
-          const { orderId, updates } = data;
-          console.log('Processing order update for:', orderId, updates);
-          const orderIndex = orders.findIndex(o => o.id === orderId);
-          
-          if (orderIndex !== -1) {
-            // Only update isDispatched status, preserve existing dispatch time
-            const updatedOrder = {
-              ...orders[orderIndex],
-              isDispatched: updates?.isDispatched
-            };
+      if (data.type === 'ORDER_UPDATE') {
+        const { orderId, updates } = data;
+        console.log('Processing order update for:', orderId, updates);
 
-            // Only update dispatch time if explicitly provided
-            if (updates?.dispatchTime) {
-              updatedOrder.dispatchTime = updates.dispatchTime;
+        // Find and update the order
+        const orderIndex = orders.findIndex(o => o.id === orderId);
+        if (orderIndex !== -1) {
+          orders[orderIndex] = {
+            ...orders[orderIndex],
+            ...updates
+          };
+
+          // Save updated orders to file
+          saveOrders();
+
+          // Broadcast the update to all connected clients
+          const updateMessage = JSON.stringify({
+            type: 'ORDER_UPDATE',
+            order: orders[orderIndex]
+          });
+
+          clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(updateMessage);
             }
-
-            orders[orderIndex] = updatedOrder;
-
-            // Save orders to file after update
-            saveOrders();
-
-            // Broadcast the update to all clients
-            const updateMessage = JSON.stringify({
-              type: 'ORDER_UPDATE',
-              orderId: orderId,
-              updates: updatedOrder
-            });
-
-            clients.forEach(client => {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(updateMessage);
-              }
-            });
-          }
-          break;
+          });
+        }
       }
     } catch (error) {
       console.error('Error processing message:', error);
@@ -331,4 +328,13 @@ wss.on('close', () => {
   if (updateIntervalRef) {
     clearInterval(updateIntervalRef);
   }
+});
+
+// Handle server shutdown
+process.on('SIGINT', () => {
+  console.log('Shutting down WebSocket server...');
+  wss.close(() => {
+    console.log('WebSocket server closed');
+    process.exit(0);
+  });
 }); 
