@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  shopifyId       String      @unique
+  orderNumber     String
+  customerName    String
+  customerEmail   String
+  phone           String?
+  address         String?
+  status          OrderStatus @default(PENDING)
+  totalAmount     Float
+  orderDate       DateTime
+  deliveryTime    DateTime?
+  travelTime      Int?        // in minutes
+  isManualTravelTime Boolean  @default(false)
+  note            String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  driver          Driver?     @relation(fields: [driverId], references: [id])
+  driverId        String?
+  items           OrderItem[]
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int
+  price     Float
+  notes     String?
+  order     Order   @relation(fields: [orderId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
+}
+
+model Product {
+  id          String             @id @default(cuid())
+  name        String
+  description String?
+  price       Float
+  category    String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  sku         String?
+  orderItems  OrderItem[]
+  stockItems  ProductStockItem[]
+}
+
+model StockItem {
+  id          String                @id @default(cuid())
+  name        String                @unique
+  description String?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  products    ProductStockItem[]
+  ingredients StockItemIngredient[]
+}
+
+model StockItemIngredient {
+  id           String     @id @default(cuid())
+  stockItemId  String
+  ingredientId String
+  quantity     Float
+  unit         String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  stockItem    StockItem  @relation(fields: [stockItemId], references: [id])
+}
+
+model ProductStockItem {
+  id          String    @id @default(cuid())
+  productId   String
+  stockItemId String
+  quantity    Float
+  unit        String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  product     Product   @relation(fields: [productId], references: [id])
+  stockItem   StockItem @relation(fields: [stockItemId], references: [id])
+}
+
+model Ingredient {
+  id          String                @id @default(cuid())
+  name        String
+  unit        String
+  createdAt   DateTime              @default(now())
+  lastUpdated DateTime              @updatedAt
+  price       Float
+  sku         String?               @unique
+  supplierId  String
+  supplier    Supplier              @relation(fields: [supplierId], references: [id])
+  stockItems  StockItemIngredient[]
+}
+
+model Supplier {
+  id          String       @id @default(cuid())
+  name        String
+  type        SupplierType
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  ingredients Ingredient[]
+}
+
+model ProductList {
+  id          String    @id @default(cuid())
+  addon       String
+  handle      String
+  totalCost   String?
+  listOfIng   String?   @map("list_of_ing")
+  meat1       String?
+  meat2       String?
+  option1     String?
+  option2     String?
+  serveware   String?
+  timerA      String?   @map("timer_a")
+  timerB      String?   @map("timer_b")
+  skuSearch   String?   @map("sku_search")
+  variantSku  String    @unique @map("variant_sku")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Driver {
+  id        String   @id @default(cuid())
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum SupplierType {
+  GILMOURS
+  BIDFOOD
+  OTHER
+}
