@@ -1,36 +1,63 @@
-export interface Driver {
+export enum OrderStatus {
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  READY = 'READY',
+  DELIVERED = 'DELIVERED',
+  CANCELLED = 'CANCELLED'
+}
+
+export type Product = {
   id: string;
   name: string;
-}
-
-export interface OrderItem {
-  id: string;
-  quantity: number;
+  description?: string;
   price: number;
-  product: {
-    name: string;
-    sku: string | null;
-  };
-}
+  category?: string;
+  sku?: string;
+};
 
-export interface Order {
+export type Order = {
   id: string;
-  _id?: string; // For MongoDB compatibility
+  shopifyId: string;
   orderNumber: string;
   customerName: string;
-  address: string;
-  status: string;
+  customerEmail: string;
+  phone?: string;
+  address?: string;
+  status: OrderStatus;
+  totalAmount: number;
   orderDate: string;
-  deliveryTime: string | null;
-  travelTime: number | null;
-  driver: Driver | null;
-  items: OrderItem[];
-  phone: string | null;
+  deliveryTime?: string;
+  travelTime?: number;
+  isManualTravelTime?: boolean;
   note?: string;
-  createdAt?: string;
-  dispatchTime: string | null;
+  createdAt: string;
+  updatedAt: string;
+  driver?: Driver | null;
+  driverId?: string | null;
+  items: OrderItem[];
   isDispatched?: boolean;
-}
+  dispatchTime?: string;
+  attributes?: {
+    Phone?: string;
+    [key: string]: string | undefined;
+  };
+};
+
+export type OrderItem = {
+  id: string;
+  orderId: string;
+  productId: string;
+  quantity: number;
+  price: number;
+  notes?: string;
+  product: Product;
+};
+
+export type Driver = {
+  id: string;
+  name: string;
+  active: boolean;
+};
 
 export interface ProductList {
   id: string;

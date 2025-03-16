@@ -137,6 +137,38 @@ model Driver {
   orders    Order[]
 }
 
+model Staff {
+  id          String   @id @default(cuid())
+  firstName   String
+  lastName    String
+  dateOfBirth DateTime
+  address     String
+  email       String   @unique
+  phoneNumber String
+  payRate     Float
+  isDriver    Boolean  @default(false)
+  isAdmin     Boolean  @default(false)
+  password    String?
+  shifts      Shift[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Shift {
+  id        String   @id @default(cuid())
+  staffId   String
+  staff     Staff    @relation(fields: [staffId], references: [id])
+  date      DateTime
+  clockIn   DateTime
+  clockOut  DateTime?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([staffId])
+  @@index([date])
+}
+
 enum OrderStatus {
   PENDING
   PROCESSING

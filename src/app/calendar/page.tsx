@@ -119,16 +119,16 @@ export default function CalendarPage() {
   console.log('Filtered orders:', filteredOrders.length);
 
   return (
-    <div className="flex h-screen">
+    <div className="fixed inset-0 top-16 flex">
       {/* Left sidebar with calendar and stock list */}
-      <div className="w-1/5 p-4 border-r">
-        <div className="mb-8">
+      <div className="w-[300px] bg-white border-r">
+        <div className="p-4">
           <Calendar
             onChange={handleDateChange}
             value={selectedDate}
           />
         </div>
-        <div>
+        <div className="p-4">
           {/* Stock list will go here */}
           <h2 className="text-xl font-bold mb-4">Stock List</h2>
           {/* Stock list content */}
@@ -136,19 +136,21 @@ export default function CalendarPage() {
       </div>
 
       {/* Main content area with order list */}
-      <div className="flex-1 overflow-hidden">
-        <div className="px-6 py-4 bg-white shadow-sm">
-          <h1 className="text-2xl font-bold">
+      <div className="flex-1 flex flex-col">
+        <div className="bg-white shadow-sm">
+          <h1 className="text-2xl font-bold p-4">
             Orders for {selectedDate.toLocaleDateString()} ({filteredOrders.length})
           </h1>
         </div>
-        <OrderList
-          orders={filteredOrders}
-          onOrderUpdate={handleOrderUpdate}
-          filterDate={selectedDate}
-          sortBy="dispatchTime"
-          productList={productList}
-        />
+        <div className="flex-1">
+          <OrderList
+            orders={filteredOrders}
+            onOrderUpdate={handleOrderUpdate}
+            filterDate={selectedDate}
+            sortBy="dispatchTime"
+            productList={productList}
+          />
+        </div>
       </div>
     </div>
   );

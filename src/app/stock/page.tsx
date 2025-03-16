@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Upload } from 'lucide-react';
 
-type Tab = 'products' | 'stock' | 'gilmours' | 'bidfood' | 'other' | 'product-list';
+type Tab = 'products' | 'stock' | 'gilmours' | 'bidfood' | 'other' | 'product-list' | 'drivers';
 
 type Product = {
   id: string;
@@ -33,11 +33,17 @@ type ProductList = {
   updatedAt: Date;
 };
 
+type Driver = {
+  id: string;
+  name: string;
+};
+
 export default function StockPage() {
   const [activeTab, setActiveTab] = useState<Tab>('products');
   const [products, setProducts] = useState<Product[]>([]);
   const [productList, setProductList] = useState<ProductList[]>([]);
   const [loading, setLoading] = useState(true);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
 
   const fetchProducts = async () => {
     try {
@@ -65,11 +71,24 @@ export default function StockPage() {
     }
   };
 
+  const fetchDrivers = async () => {
+    try {
+      const response = await fetch('/api/drivers');
+      if (!response.ok) throw new Error('Failed to fetch drivers');
+      const data = await response.json();
+      setDrivers(data);
+    } catch (error) {
+      console.error('Error fetching drivers:', error);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'products') {
       fetchProducts();
     } else if (activeTab === 'product-list') {
       fetchProductList();
+    } else if (activeTab === 'drivers') {
+      fetchDrivers();
     }
   }, [activeTab]);
 
@@ -111,13 +130,14 @@ export default function StockPage() {
       <h1 className="text-2xl font-bold mb-6">Stock Management</h1>
       
       <Tabs defaultValue="products" className="w-full" onValueChange={(value) => setActiveTab(value as Tab)}>
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="products">Products</TabsTrigger>
           <TabsTrigger value="product-list">Product List</TabsTrigger>
           <TabsTrigger value="stock">Stock</TabsTrigger>
           <TabsTrigger value="gilmours">Gilmours</TabsTrigger>
           <TabsTrigger value="bidfood">Bidfood</TabsTrigger>
           <TabsTrigger value="other">Other</TabsTrigger>
+          <TabsTrigger value="drivers">Drivers</TabsTrigger>
         </TabsList>
 
         <TabsContent value="products" className="mt-6">
@@ -326,6 +346,64 @@ export default function StockPage() {
             </div>
           </div>
           {/* Other ingredients table will go here */}
+        </TabsContent>
+
+        <TabsContent value="drivers" className="mt-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold">Delivery Drivers</h2>
+            <Button onClick={() => {
+              const name = prompt("Enter driver's first name:");
+              if (name) {
+                // Add driver to database
+                fetch('/api/drivers', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ name }),
+                }).then(() => {
+                  // Refresh the drivers list
+                  fetchDrivers();
+                });
+              }
+            }}>Add Driver</Button>
+          </div>
+          
+          <div className="border rounded-lg">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {drivers.map((driver) => (
+                  <tr key={driver.id}>
+                    <td className="px-6 py-4 whitespace-nowrap">{driver.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => {
+                          if (confirm(`Are you sure you want to remove ${driver.name}?`)) {
+                            fetch(`/api/drivers/${driver.id}`, {
+                              method: 'DELETE',
+                            }).then(() => {
+                              // Refresh the drivers list
+                              fetchDrivers();
+                            });
+                          }
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </TabsContent>
       </Tabs>
     </div>
