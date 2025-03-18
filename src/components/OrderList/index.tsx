@@ -135,15 +135,14 @@ const OrderItems = ({ items, productList }: { items: Order['items']; productList
           <div className="flex flex-wrap items-center">
             {addonItems.map(({ item, productDetails }: { item: OrderItem; productDetails: ProductList | undefined }, index: number) => (
               <>
-                <div key={index} className="text-2xl text-black">
+                {index > 0 && <span className="text-blue-500 mx-2">•</span>}
+                <div key={`${item.id}-${index}`} className="text-2xl text-blue-500">
                   <span>
                     {item.quantity > 1 ? `${item.quantity}x ` : ''}
                     {productDetails?.handle || item.product.name}
                   </span>
+                  <MeatValues productDetails={productDetails} />
                 </div>
-                {index < addonItems.length - 1 && (
-                  <span className="text-pink-500 mx-2 text-xl">•</span>
-                )}
               </>
             ))}
           </div>
@@ -179,6 +178,7 @@ export const OrderList: React.FC<OrderListProps> = ({
   const [localOrders, setLocalOrders] = useState<Order[]>(orders);
   const [showDispatchedOrders, setShowDispatchedOrders] = useState(false);
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [ws, setWs] = useState<WebSocket | null>(null);
 
   // Add driver fetching
   const fetchDrivers = async () => {
@@ -195,6 +195,30 @@ export const OrderList: React.FC<OrderListProps> = ({
   // Fetch drivers on component mount
   useEffect(() => {
     fetchDrivers();
+  }, []);
+
+  // Set up WebSocket connection
+  useEffect(() => {
+    const websocket = new WebSocket('ws://localhost:3002');
+    
+    websocket.onopen = () => {
+      console.log('WebSocket connection established');
+      setWs(websocket);
+    };
+
+    websocket.onclose = () => {
+      console.log('WebSocket connection closed');
+      setWs(null);
+    };
+
+    websocket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setWs(null);
+    };
+
+    return () => {
+      websocket.close();
+    };
   }, []);
 
   // Update driver assignment
@@ -245,6 +269,28 @@ export const OrderList: React.FC<OrderListProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Update local orders when props change, preserving manual travel times
+  React.useEffect(() => {
+    const savedTravelTimes = localStorage.getItem('manualTravelTimes');
+    const travelTimes = savedTravelTimes ? JSON.parse(savedTravelTimes) : {};
+    
+    setLocalOrders(orders.map(order => {
+      if (travelTimes[order.id]) {
+        const dispatchTime = order.deliveryTime 
+          ? new Date(new Date(order.deliveryTime).getTime() - travelTimes[order.id].time * 60 * 1000).toISOString()
+          : undefined;
+          
+        return {
+          ...order,
+          travelTime: travelTimes[order.id].time,
+          isManualTravelTime: true,
+          dispatchTime
+        } satisfies Order;
+      }
+      return order;
+    }));
+  }, [orders]);
+
   // Load manual travel times from localStorage on mount
   React.useEffect(() => {
     const savedTravelTimes = localStorage.getItem('manualTravelTimes');
@@ -253,14 +299,16 @@ export const OrderList: React.FC<OrderListProps> = ({
       setLocalOrders(prevOrders => 
         prevOrders.map(order => {
           if (travelTimes[order.id]) {
+            const dispatchTime = order.deliveryTime 
+              ? new Date(new Date(order.deliveryTime).getTime() - travelTimes[order.id].time * 60 * 1000).toISOString()
+              : undefined;
+
             return {
               ...order,
               travelTime: travelTimes[order.id].time,
               isManualTravelTime: true,
-              dispatchTime: order.deliveryTime 
-                ? new Date(new Date(order.deliveryTime).getTime() - travelTimes[order.id].time * 60 * 1000).toISOString()
-                : null
-            };
+              dispatchTime
+            } satisfies Order;
           }
           return order;
         })
@@ -268,28 +316,10 @@ export const OrderList: React.FC<OrderListProps> = ({
     }
   }, []);
 
-  // Update local orders when props change, preserving manual travel times
-  React.useEffect(() => {
-    const savedTravelTimes = localStorage.getItem('manualTravelTimes');
-    const travelTimes = savedTravelTimes ? JSON.parse(savedTravelTimes) : {};
-    
-    setLocalOrders(orders.map(order => {
-      if (travelTimes[order.id]) {
-        return {
-          ...order,
-          travelTime: travelTimes[order.id].time,
-          isManualTravelTime: true,
-          dispatchTime: order.deliveryTime 
-            ? new Date(new Date(order.deliveryTime).getTime() - travelTimes[order.id].time * 60 * 1000).toISOString()
-            : null
-        };
-      }
-      return order;
-    }));
-  }, [orders]);
-
   const handleTravelTimeUpdate = async (orderId: string, minutes: number) => {
-    // Update local state immediately
+    console.log(`Updating travel time for order: ${orderId} to ${minutes} minutes`);
+
+    // Update local state first
     setLocalOrders(prevOrders => {
       return prevOrders.map(order => {
         if (order.id === orderId) {
@@ -297,13 +327,7 @@ export const OrderList: React.FC<OrderListProps> = ({
             ...order,
             travelTime: minutes,
             isManualTravelTime: true,
-            dispatchTime: calculateDispatchTime(order.deliveryTime, minutes),
-            status: order.status,
-            totalAmount: order.totalAmount,
-            shopifyId: order.shopifyId,
-            customerEmail: order.customerEmail,
-            createdAt: order.createdAt,
-            updatedAt: order.updatedAt
+            dispatchTime: calculateDispatchTime(order.deliveryTime, minutes)
           } satisfies Order;
           return updatedOrder;
         }
@@ -313,90 +337,22 @@ export const OrderList: React.FC<OrderListProps> = ({
 
     // Store in localStorage
     const currentTravelTimes = JSON.parse(localStorage.getItem('manualTravelTimes') || '{}');
-    currentTravelTimes[orderId] = minutes;
+    currentTravelTimes[orderId] = { time: minutes, timestamp: Date.now() };
     localStorage.setItem('manualTravelTimes', JSON.stringify(currentTravelTimes));
 
-    // Persist changes through WebSocket
-    try {
-      console.log('Opening WebSocket connection for travel time update');
-      const ws = new WebSocket('ws://localhost:3002');
-
-      ws.onopen = () => {
-        console.log('WebSocket connection opened successfully');
-        const message = {
-          type: 'ORDER_UPDATE',
-          orderId: orderId,
-          updates: {
-            travelTime: minutes,
-            isManualTravelTime: true
-          }
-        };
-        console.log('Preparing to send WebSocket message:', message);
-        ws.send(JSON.stringify(message));
-        console.log('WebSocket message sent');
-        
-        // Don't close immediately, wait for response
-        setTimeout(() => {
-          console.log('Closing WebSocket connection after timeout');
-          ws.close();
-        }, 1000);
-      };
-
-      ws.onmessage = (event) => {
-        console.log('Received WebSocket response:', event.data);
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Parsed WebSocket response:', data);
-          
-          if (data.type === 'ORDER_UPDATE' && data.orderId === orderId) {
-            console.log('Received matching order update, updating local state');
-            setLocalOrders(prevOrders =>
-              prevOrders.map(order =>
-                order.id === orderId
-                  ? {
-                      ...order,
-                      travelTime: data.updates.travelTime,
-                      isManualTravelTime: true,
-                      dispatchTime: calculateDispatchTime(order.deliveryTime, data.updates.travelTime),
-                      status: order.status,
-                      totalAmount: order.totalAmount,
-                      shopifyId: order.shopifyId,
-                      customerEmail: order.customerEmail,
-                      createdAt: order.createdAt,
-                      updatedAt: order.updatedAt
-                    } satisfies Order
-                  : order
-              )
-            );
-          }
-        } catch (error) {
-          console.error('Error parsing WebSocket response:', error);
+    // Send update through WebSocket if connected
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const message = {
+        type: 'ORDER_UPDATE',
+        orderId: orderId,
+        updates: {
+          travelTime: minutes,
+          isManualTravelTime: true
         }
       };
-
-      ws.onclose = () => {
-        console.log('WebSocket connection closed');
-      };
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        // Revert local state on error
-        console.log('Reverting local state due to WebSocket error');
-        setLocalOrders(orders);
-        // Remove from localStorage on error
-        const currentTravelTimes = JSON.parse(localStorage.getItem('manualTravelTimes') || '{}');
-        delete currentTravelTimes[orderId];
-        localStorage.setItem('manualTravelTimes', JSON.stringify(currentTravelTimes));
-      };
-    } catch (error) {
-      console.error('Failed to update travel time:', error);
-      // Revert local state on error
-      console.log('Reverting local state due to error');
-      setLocalOrders(orders);
-      // Remove from localStorage on error
-      const currentTravelTimes = JSON.parse(localStorage.getItem('manualTravelTimes') || '{}');
-      delete currentTravelTimes[orderId];
-      localStorage.setItem('manualTravelTimes', JSON.stringify(currentTravelTimes));
+      ws.send(JSON.stringify(message));
+    } else {
+      console.warn('WebSocket not connected, update will not be persisted');
     }
   };
 
@@ -567,7 +523,7 @@ export const OrderList: React.FC<OrderListProps> = ({
   }
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-gray-50">
+    <div className="h-full overflow-y-auto bg-gray-50">
       {/* Dispatch Toggle */}
       <div className="sticky top-0 bg-gray-50 py-1 z-10 flex items-center gap-4">
         <label className="flex items-center gap-2 text-sm text-gray-600">
@@ -641,163 +597,167 @@ export const OrderList: React.FC<OrderListProps> = ({
       </div>
 
       <div className="space-y-0.5 divide-gray-200">
-        {filteredOrders.map((order) => {
-          const addressData = parseAddress(order.address);
-          const formattedAddress = formatAddress(addressData);
-          const dispatchTime = order.dispatchTime ? new Date(order.dispatchTime) : null;
-          const deliveryTime = order.deliveryTime ? new Date(order.deliveryTime) : null;
-          const note = cleanNote(order.note);
+        <div className="p-4">
+          {sortedOrders.map((order) => {
+            const addressData = parseAddress(order.address);
+            const formattedAddress = formatAddress(addressData);
+            const dispatchTime = order.dispatchTime ? new Date(order.dispatchTime) : null;
+            const deliveryTime = order.deliveryTime ? new Date(order.deliveryTime) : null;
+            const note = cleanNote(order.note);
 
-          return (
-            <div key={order.id} className={`bg-white hover:bg-gray-50 rounded shadow-sm ${order.isDispatched ? 'opacity-50' : ''}`}>
-              {/* Main Grid Layout */}
-              <div className="grid grid-cols-12 gap-2 items-center p-0.5" style={{ backgroundColor: '#FFF8E2' }}>
-                {/* All Controls Container - Far Left */}
-                <div className="col-span-3 flex items-center gap-1">
-                  {/* Icons */}
-                  <div className="flex items-center gap-1">
-                    {/* Edit Button */}
+            return (
+              <div key={order.id} className={`bg-white hover:bg-gray-50 rounded shadow-sm ${order.isDispatched ? 'opacity-50' : ''}`}>
+                {/* Main Grid Layout */}
+                <div className="grid grid-cols-12 gap-2 items-center p-0.5" style={{ backgroundColor: '#FFF8E2' }}>
+                  {/* All Controls Container - Far Left */}
+                  <div className="col-span-3 flex items-center gap-1">
+                    {/* Icons */}
+                    <div className="flex items-center gap-1">
+                      {/* Edit Button */}
+                      <button
+                        onClick={() => {
+                          setSelectedOrder(order);
+                          setShowEditModal(true);
+                        }}
+                        className="text-gray-500 hover:text-gray-700 p-1.5 rounded-full hover:bg-gray-100 text-lg"
+                        title="Edit order"
+                      >
+                        ✏️
+                      </button>
+
+                      {/* Dispatch Button */}
+                      <button
+                        onClick={() => handleDispatch(order.id)}
+                        className={`p-1.5 rounded-full hover:bg-gray-100 ${
+                          order.isDispatched ? 'text-green-600 hover:text-red-600' : 'text-gray-500 hover:text-green-600'
+                        }`}
+                        title={order.isDispatched ? 'Undo Dispatch' : 'Dispatch Order'}
+                      >
+                        <svg 
+                          xmlns="http://www.w3.org/2000/svg" 
+                          viewBox="0 0 24 24" 
+                          fill="currentColor" 
+                          className="w-6 h-6"
+                        >
+                          {order.isDispatched ? (
+                            <path d="M9.195 18.44c1.25.713 2.805-.19 2.805-1.629v-2.34l6.945 3.968c1.25.714 2.805-.188 2.805-1.628V8.688c0-1.44-1.555-2.342-2.805-1.628L12 11.03v-2.34c0-1.44-1.555-2.343-2.805-1.629l-7.108 4.062c-1.26.72-1.26 2.536 0 3.256l7.108 4.061z" />
+                          ) : (
+                            <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
+                          )}
+                        </svg>
+                      </button>
+                    </div>
+
+                    {/* Time and Controls */}
+                    <div className="flex items-center gap-1 ml-1">
+                      {/* Dispatch Time */}
+                      <div className="text-lg font-medium w-[7rem]">
+                        {dispatchTime ? format(dispatchTime, 'h:mm a') + ' ' : '-'}
+                      </div>
+
+                      {/* Travel Time */}
+                      <input
+                        type="number"
+                        value={order.travelTime || ''}
+                        onChange={(e) => {
+                          const minutes = parseInt(e.target.value);
+                          if (!isNaN(minutes) && minutes >= 0) {
+                            handleTravelTimeUpdate(order.id, minutes);
+                          }
+                        }}
+                        onFocus={(e) => e.target.select()}
+                        className={`w-14 px-1 py-0.5 text-base border rounded shadow-sm hover:bg-gray-50 
+                          ${order.isManualTravelTime ? 'bg-yellow-50' : 'bg-white'}`}
+                        placeholder="-"
+                        min="0"
+                        title={order.isManualTravelTime ? 'Manually set travel time' : 'Automatically calculated travel time'}
+                      />
+
+                      {/* Driver Assignment */}
+                      <select
+                        value={order.driverId || ''}
+                        onChange={(e) => handleDriverAssignment(order.id, e.target.value)}
+                        className="w-28 px-1 py-0.5 text-base border rounded bg-white shadow-sm hover:bg-gray-50"
+                      >
+                        <option value="">Driver</option>
+                        {drivers.map((driver) => (
+                          <option key={driver.id} value={driver.id}>
+                            {driver.name}
+                          </option>
+                        ))}
+                      </select>
+
+                      {/* Order Number and Phone */}
+                      <div className="flex items-center gap-1 ml-1">
+                        <span className="text-sm text-black">#{order.orderNumber.replace('#', '')} • {order.phone || order.attributes?.Phone || '000000000'} • {deliveryTime ? format(deliveryTime, 'h:mm a') : '-'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Address */}
+                  <div className="col-span-3">
                     <button
                       onClick={() => {
                         setSelectedOrder(order);
-                        setShowEditModal(true);
+                        setShowMapModal(true);
                       }}
-                      className="text-gray-500 hover:text-gray-700 p-1.5 rounded-full hover:bg-gray-100 text-lg"
-                      title="Edit order"
+                      className="text-left text-lg w-full truncate hover:text-gray-600"
+                      title={formattedAddress}
                     >
-                      ✏️
+                      {formattedAddress}
                     </button>
+                  </div>
 
-                    {/* Dispatch Button */}
-                    <button
-                      onClick={() => handleDispatch(order.id)}
-                      className={`p-1.5 rounded-full hover:bg-gray-100 ${
-                        order.isDispatched ? 'text-green-600 hover:text-red-600' : 'text-gray-500 hover:text-green-600'
-                      }`}
-                      title={order.isDispatched ? 'Undo Dispatch' : 'Dispatch Order'}
-                    >
-                      <svg 
-                        xmlns="http://www.w3.org/2000/svg" 
-                        viewBox="0 0 24 24" 
-                        fill="currentColor" 
-                        className="w-6 h-6"
+                  {/* Customer Info - Single Column */}
+                  <div className="col-span-2 flex flex-col justify-center items-center text-base">
+                    <div className="text-center">
+                      <span>{addressData?.first_name} {addressData?.last_name}</span>
+                      {addressData?.company && (
+                        <>
+                          <span className="mx-1">•</span>
+                          <span>{addressData.company}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Notes - Fixed to right side */}
+                  <div className="col-span-4">
+                    {note && (
+                      <button
+                        onClick={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setNotesPopupPosition({
+                            top: rect.bottom + window.scrollY,
+                            left: rect.left + window.scrollX
+                          });
+                          setSelectedNotes(note);
+                          setShowNotesPopup(true);
+                        }}
+                        className="w-full text-left notes-trigger"
                       >
-                        {order.isDispatched ? (
-                          <path d="M9.195 18.44c1.25.713 2.805-.19 2.805-1.629v-2.34l6.945 3.968c1.25.714 2.805-.188 2.805-1.628V8.688c0-1.44-1.555-2.342-2.805-1.628L12 11.03v-2.34c0-1.44-1.555-2.343-2.805-1.629l-7.108 4.062c-1.26.72-1.26 2.536 0 3.256l7.108 4.061z" />
-                        ) : (
-                          <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
-                        )}
-                      </svg>
-                    </button>
-                  </div>
-
-                  {/* Time and Controls */}
-                  <div className="flex items-center gap-1 ml-1">
-                    {/* Dispatch Time */}
-                    <div className="text-lg font-medium w-[7rem]">
-                      {dispatchTime ? format(dispatchTime, 'h:mm a') + ' ' : '-'}
-                    </div>
-
-                    {/* Travel Time */}
-                    <input
-                      type="number"
-                      value={order.travelTime || ''}
-                      onChange={(e) => {
-                        const minutes = parseInt(e.target.value);
-                        if (!isNaN(minutes) && minutes >= 0) {
-                          handleTravelTimeUpdate(order.id, minutes);
-                        }
-                      }}
-                      onFocus={(e) => e.target.select()}
-                      className={`w-14 px-1 py-0.5 text-base border rounded shadow-sm hover:bg-gray-50 
-                        ${order.isManualTravelTime ? 'bg-yellow-50' : 'bg-white'}`}
-                      placeholder="-"
-                      min="0"
-                      title={order.isManualTravelTime ? 'Manually set travel time' : 'Automatically calculated travel time'}
-                    />
-
-                    {/* Driver Assignment */}
-                    <select
-                      value={order.driverId || ''}
-                      onChange={(e) => handleDriverAssignment(order.id, e.target.value)}
-                      className="w-28 px-1 py-0.5 text-base border rounded bg-white shadow-sm hover:bg-gray-50"
-                    >
-                      <option value="">Driver</option>
-                      {drivers.map((driver) => (
-                        <option key={driver.id} value={driver.id}>
-                          {driver.name}
-                        </option>
-                      ))}
-                    </select>
-
-                    {/* Order Number and Phone */}
-                    <div className="flex items-center gap-1 ml-1">
-                      <span className="text-sm text-black">#{order.orderNumber.replace('#', '')} • {order.attributes?.Phone || '000000000'} • {deliveryTime ? format(deliveryTime, 'h:mm a') : '-'}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Address */}
-                <div className="col-span-3">
-                  <button
-                    onClick={() => {
-                      setSelectedOrder(order);
-                      setShowMapModal(true);
-                    }}
-                    className="text-left text-lg w-full truncate hover:text-gray-600"
-                    title={formattedAddress}
-                  >
-                    {formattedAddress}
-                  </button>
-                </div>
-
-                {/* Customer Info - Single Column */}
-                <div className="col-span-2 flex flex-col justify-center items-center text-base">
-                  <div className="text-center">
-                    <span>{addressData?.first_name} {addressData?.last_name}</span>
-                    {addressData?.company && (
-                      <>
-                        <span className="mx-1">•</span>
-                        <span>{addressData.company}</span>
-                      </>
+                        <div className="max-h-[2em] overflow-hidden">
+                          <span className="text-base text-blue-600 block leading-[1.4em] whitespace-pre-wrap">
+                            {note}
+                          </span>
+                        </div>
+                      </button>
                     )}
                   </div>
                 </div>
 
-                {/* Notes - Fixed to right side */}
-                <div className="col-span-4">
-                  {note && (
-                    <button
-                      onClick={(e) => {
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        setNotesPopupPosition({
-                          top: rect.bottom + window.scrollY,
-                          left: rect.left + window.scrollX
-                        });
-                        setSelectedNotes(note);
-                        setShowNotesPopup(true);
-                      }}
-                      className="w-full text-left notes-trigger"
-                    >
-                      <div className="max-h-[2em] overflow-hidden">
-                        <span className="text-base text-blue-600 block leading-[1.4em] whitespace-pre-wrap">
-                          {note}
-                        </span>
-                      </div>
-                    </button>
-                  )}
+                {/* Order Items */}
+                <div className="bg-white px-4 py-0.5">
+                  <OrderItems items={order.items} productList={productList} />
                 </div>
               </div>
-
-              {/* Order Items */}
-              <div className="bg-white px-4 py-0.5">
-                <OrderItems items={order.items} productList={productList} />
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+        {/* Add padding div that's 50vh (half screen height) tall */}
+        <div className="h-[50vh]"></div>
       </div>
-
+      
       {/* Modals */}
       {selectedOrder && showMapModal && (
         <MapModal

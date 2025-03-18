@@ -169,43 +169,48 @@ async function processShopifyOrder(shopifyOrder: any) {
   let deliveryDate = null;
   let phoneNumber = null;
 
-  if (deliveryAttributes) {
+  // First try to find delivery info and phone number in the order notes as it's the most reliable source
+  if (shopifyOrder.note) {
+    console.log('Checking order notes for delivery info and phone:', shopifyOrder.note);
+    try {
+      // Extract delivery time from notes using regex
+      const timeMatch = shopifyOrder.note.match(/Delivery Time: ([0-9:]+ [AP]M)/);
+      const dateMatch = shopifyOrder.note.match(/Delivery Date: ([A-Za-z]+ [A-Za-z]+ \d+)/);
+      const phoneMatch = shopifyOrder.note.match(/Phone:\s*([^\n|]+)/);
+      
+      if (timeMatch) {
+        deliveryTime = timeMatch[1];
+        console.log('Found delivery time in notes:', deliveryTime);
+      }
+      if (dateMatch) {
+        deliveryDate = dateMatch[1];
+        console.log('Found delivery date in notes:', deliveryDate);
+      }
+      if (phoneMatch) {
+        phoneNumber = phoneMatch[1].trim();
+        console.log('Found phone number in notes:', phoneNumber);
+      }
+    } catch (e) {
+      console.error('Error parsing order notes:', e);
+    }
+  }
+
+  // If not found in notes, try delivery attributes as fallback
+  if ((!deliveryTime || !deliveryDate || !phoneNumber) && deliveryAttributes) {
     try {
       console.log('Raw delivery attributes:', deliveryAttributes.value);
       const attributes = JSON.parse(deliveryAttributes.value);
       console.log('Parsed delivery attributes:', attributes);
       
       // Extract delivery time and date
-      deliveryTime = attributes.delivery_time;
-      deliveryDate = attributes.delivery_date;
-      phoneNumber = attributes.phone_number;
+      if (!deliveryTime) deliveryTime = attributes.delivery_time;
+      if (!deliveryDate) deliveryDate = attributes.delivery_date;
+      if (!phoneNumber) phoneNumber = attributes.phone_number;
       
-      console.log('Extracted delivery info:', { deliveryTime, deliveryDate, phoneNumber });
+      console.log('Extracted delivery info from attributes:', { deliveryTime, deliveryDate, phoneNumber });
     } catch (e) {
       console.error('Error parsing delivery attributes:', e);
       console.error('Raw value:', deliveryAttributes.value);
-    }
-  } else {
-    console.log('No delivery attributes found in note_attributes');
-    // Try to find delivery info in the order notes
-    if (shopifyOrder.note) {
-      console.log('Checking order notes for delivery info:', shopifyOrder.note);
-      try {
-        // Extract delivery time from notes using regex
-        const timeMatch = shopifyOrder.note.match(/Delivery Time: ([0-9:]+ [AP]M)/);
-        const dateMatch = shopifyOrder.note.match(/Delivery Date: ([A-Za-z]+ [A-Za-z]+ \d+)/);
-        
-        if (timeMatch) {
-          deliveryTime = timeMatch[1];
-          console.log('Found delivery time:', deliveryTime);
-        }
-        if (dateMatch) {
-          deliveryDate = dateMatch[1];
-          console.log('Found delivery date:', deliveryDate);
-        }
-      } catch (e) {
-        console.error('Error parsing order notes:', e);
-      }
     }
   }
 
@@ -218,11 +223,13 @@ async function processShopifyOrder(shopifyOrder: any) {
     console.log('Using default delivery time:', { deliveryTime, deliveryDate });
   }
 
-  // Get phone number from multiple possible sources
-  phoneNumber = phoneNumber || 
-                shopifyOrder.phone || 
-                shopifyOrder.shipping_address?.phone ||
-                shopifyOrder.billing_address?.phone;
+  // Only use other phone number sources if not found in notes or attributes
+  if (!phoneNumber) {
+    phoneNumber = shopifyOrder.phone || 
+                  shopifyOrder.shipping_address?.phone ||
+                  shopifyOrder.billing_address?.phone;
+    console.log('Using fallback phone number:', phoneNumber);
+  }
 
   if (!phoneNumber) {
     console.log('Warning: No phone number found for order:', shopifyOrder.name);

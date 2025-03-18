@@ -5,73 +5,78 @@ import { authOptions } from '@/lib/auth';
 
 export async function GET(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session) {
+    const session = await getServerSession();
+    if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { searchParams } = new URL(request.url);
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
-    const staffId = searchParams.get('staffId');
+    // Get staff member
+    const staff = await prisma.staff.findUnique({
+      where: { email: session.user.email },
+    });
 
-    const where: any = {};
-    
-    if (startDate && endDate) {
-      where.date = {
-        gte: new Date(startDate),
-        lte: new Date(endDate),
-      };
+    if (!staff) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // If user is not admin, only show their own shifts
-    if (session.user.role !== 'admin') {
-      where.staffId = session.user.id;
-    } else if (staffId) {
-      where.staffId = staffId;
-    }
-
+    // Get shifts for the staff member
     const shifts = await prisma.shift.findMany({
-      where,
-      include: {
-        staff: {
-          select: {
-            name: true,
-            email: true,
-          },
-        },
-      },
-      orderBy: {
-        date: 'desc',
-      },
+      where: { staffId: staff.id },
+      orderBy: { startTime: 'desc' },
     });
 
     return NextResponse.json(shifts);
   } catch (error) {
     console.error('Error fetching shifts:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session) {
+    const session = await getServerSession();
+    if (!session?.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { date, clockIn, clockOut, notes } = await request.json();
+    const data = await request.json();
+    const { staffId, startTime, notes } = data;
 
-    if (!date || !clockIn) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    // Verify the staff member exists and matches the session
+    const staff = await prisma.staff.findFirst({
+      where: {
+        id: staffId,
+        email: session.user.email,
+      },
+    });
+
+    if (!staff) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Check if there's already an active shift
+    const activeShift = await prisma.shift.findFirst({
+      where: {
+        staffId,
+        endTime: null,
+      },
+    });
+
+    if (activeShift) {
+      return NextResponse.json(
+        { error: 'Already clocked in' },
+        { status: 400 }
+      );
+    }
+
+    // Create new shift
     const shift = await prisma.shift.create({
       data: {
-        staffId: session.user.id,
-        date: new Date(date),
-        clockIn: new Date(clockIn),
-        clockOut: clockOut ? new Date(clockOut) : null,
+        staffId,
+        startTime: new Date(startTime),
         notes,
       },
     });
@@ -79,7 +84,10 @@ export async function POST(request: Request) {
     return NextResponse.json(shift);
   } catch (error) {
     console.error('Error creating shift:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    );
   }
 }
 

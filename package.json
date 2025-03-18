@@ -8,18 +8,23 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "websocket": "ts-node websocket-server.ts"
+    "websocket:build": "tsc -p tsconfig.websocket.json",
+    "websocket:start": "node dist/websocket-server.js",
+    "websocket": "npm run websocket:build && npm run websocket:start"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.0",
     "@heroicons/react": "^2.2.0",
     "@hookform/resolvers": "^4.1.3",
     "@prisma/client": "^6.4.1",
+    "@radix-ui/react-dialog": "^1.1.6",
+    "@radix-ui/react-label": "^2.1.2",
     "@radix-ui/react-slot": "^1.1.2",
     "@radix-ui/react-tabs": "^1.1.3",
     "@shopify/shopify-api": "^11.9.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/nodemailer": "^6.4.17",
     "@types/papaparse": "^5.3.15",
     "@types/react-calendar": "^4.1.0",
     "@types/ws": "^8.18.0",
@@ -34,6 +39,7 @@
     "next": "15.2.1",
     "next-auth": "^4.24.11",
     "node-fetch": "^3.3.2",
+    "nodemailer": "^6.10.0",
     "papaparse": "^5.5.2",
     "react": "^19.0.0",
     "react-big-calendar": "^1.18.0",
@@ -41,12 +47,14 @@
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.54.2",
     "tailwind-merge": "^3.0.2",
+    "tailwindcss-animate": "^1.0.7",
     "ws": "^8.18.1",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@types/lodash": "^4.17.16",
     "@types/node": "^20.17.24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -58,7 +66,7 @@
     "typescript": "^5.8.2"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "node prisma/seed.js"
   },
   "description": "A comprehensive order management system that integrates with Shopify and provides tools for managing orders, inventory, and staff.",
   "main": "index.js",

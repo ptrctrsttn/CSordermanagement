@@ -10,6 +10,39 @@ var __assign = (this && this.__assign) || function () {
     };
     return __assign.apply(this, arguments);
 };
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -46,24 +79,65 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 var ws_1 = require("ws");
-var express_1 = require("express");
-var cors_1 = require("cors");
-var { format } = require('date-fns');
-var app = (0, express_1.default)();
-var port = process.env.PORT || 3001;
-app.use((0, cors_1.default)());
-app.use(express_1.default.json());
-var GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-var START_ADDRESS = "562 richmond road grey lynn";
-var UPDATE_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
-var wss = new ws_1.WebSocketServer({ port: 3002 });
-// Store connected clients and data
-var clients = new Set();
+var express_1 = __importDefault(require("express"));
+var cors_1 = __importDefault(require("cors"));
+var fs_1 = __importDefault(require("fs"));
+var path_1 = __importDefault(require("path"));
+var { PrismaClient } = require("@prisma/client");
+var prisma = new PrismaClient();
+// Store orders in memory
 var orders = [];
 var drivers = [];
 var productList = [];
+// Store WebSocket clients
+var clients = new Set();
+var app = (0, express_1.default)();
+var wsPort = 3002; // WebSocket port
+var httpPort = 3003; // HTTP port
+app.use((0, cors_1.default)());
+app.use(express_1.default.json());
+// File path for persisting orders
+var ORDERS_FILE = path_1.default.join(process.cwd(), 'orders.json');
+// Function to save orders to file
+var saveOrders = function () {
+    try {
+        fs_1.default.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2));
+        console.log('Orders saved to file');
+    }
+    catch (error) {
+        console.error('Error saving orders:', error);
+    }
+};
+// Function to load orders from file
+var loadOrders = function () {
+    try {
+        if (fs_1.default.existsSync(ORDERS_FILE)) {
+            var data = fs_1.default.readFileSync(ORDERS_FILE, 'utf8');
+            orders = JSON.parse(data);
+            console.log('Orders loaded from file');
+        }
+        else {
+            console.log('No existing orders file found');
+            orders = [];
+        }
+    }
+    catch (error) {
+        console.error('Error loading orders:', error);
+        orders = [];
+    }
+};
+// Load orders when server starts
+loadOrders();
+var GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+var START_ADDRESS = "562 richmond road grey lynn";
+var UPDATE_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
+// Store the update interval reference
+var updateIntervalRef;
 var parseAddress = function (addressString) {
     try {
         return JSON.parse(addressString);
@@ -108,211 +182,194 @@ var calculateDispatchTime = function (deliveryTime, travelTime) {
     var travelMinutes = travelTime || 5; // Use 5 as default if travelTime is null
     return new Date(delivery.getTime() - (travelMinutes * 60 * 1000)).toISOString();
 };
-var calculateTravelTime = function (address) {
-    return __awaiter(void 0, void 0, void 0, function () {
-        var formattedAddress, response, data, duration, minutes;
-        return __generator(this, function (_a) {
-            try {
-                formattedAddress = formatAddress(parseAddress(address));
-                response = yield fetch("https://maps.googleapis.com/maps/api/distancematrix/json?origins=".concat(encodeURIComponent(START_ADDRESS), "&destinations=").concat(encodeURIComponent(formattedAddress), "&key=").concat(GOOGLE_MAPS_API_KEY));
-                if (!response.ok) {
-                    console.warn("Failed to fetch travel time:", response.status);
-                    return [2 /*return*/, null];
+var updateAllTravelTimes = function () { return __awaiter(void 0, void 0, void 0, function () {
+    var updatedTimes, fetch, _loop_1, _i, orders_1, order, updateMessage_1;
+    var _a, _b, _c, _d, _e;
+    return __generator(this, function (_f) {
+        switch (_f.label) {
+            case 0:
+                updatedTimes = {};
+                return [4 /*yield*/, Promise.resolve().then(function () { return __importStar(require('node-fetch')); })];
+            case 1:
+                fetch = (_f.sent()).default;
+                _loop_1 = function (order) {
+                    var addressData, formattedAddress, response, data, duration, minutes, orderIndex, error_1;
+                    return __generator(this, function (_g) {
+                        switch (_g.label) {
+                            case 0:
+                                // Skip orders with manually set travel times
+                                if (order.isManualTravelTime) {
+                                    return [2 /*return*/, "continue"];
+                                }
+                                _g.label = 1;
+                            case 1:
+                                _g.trys.push([1, 4, , 5]);
+                                addressData = parseAddress(order.address);
+                                if (!addressData)
+                                    return [2 /*return*/, "continue"];
+                                formattedAddress = formatAddress(addressData);
+                                return [4 /*yield*/, fetch("/api/maps?type=distancematrix&address=".concat(encodeURIComponent(formattedAddress), "&startAddress=").concat(encodeURIComponent(START_ADDRESS)))];
+                            case 2:
+                                response = _g.sent();
+                                if (!response.ok) {
+                                    console.warn("Failed to fetch travel time for order ".concat(order.id, ":"), response.status);
+                                    return [2 /*return*/, "continue"];
+                                }
+                                return [4 /*yield*/, response.json()];
+                            case 3:
+                                data = _g.sent();
+                                if (((_d = (_c = (_b = (_a = data === null || data === void 0 ? void 0 : data.rows) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.elements) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.status) === 'OK' && ((_e = data.rows[0].elements[0].duration) === null || _e === void 0 ? void 0 : _e.text)) {
+                                    duration = data.rows[0].elements[0].duration.text;
+                                    minutes = parseInt(duration.split(' ')[0]);
+                                    if (!isNaN(minutes)) {
+                                        updatedTimes[order.id] = minutes;
+                                        orderIndex = orders.findIndex(function (o) { return o.id === order.id; });
+                                        if (orderIndex !== -1) {
+                                            orders[orderIndex] = __assign(__assign({}, orders[orderIndex]), { travelTime: minutes, dispatchTime: calculateDispatchTime(orders[orderIndex].deliveryTime, minutes) });
+                                        }
+                                    }
+                                }
+                                return [3 /*break*/, 5];
+                            case 4:
+                                error_1 = _g.sent();
+                                console.warn("Error updating travel time for order ".concat(order.id, ":"), error_1);
+                                return [2 /*return*/, "continue"];
+                            case 5: return [2 /*return*/];
+                        }
+                    });
+                };
+                _i = 0, orders_1 = orders;
+                _f.label = 2;
+            case 2:
+                if (!(_i < orders_1.length)) return [3 /*break*/, 5];
+                order = orders_1[_i];
+                return [5 /*yield**/, _loop_1(order)];
+            case 3:
+                _f.sent();
+                _f.label = 4;
+            case 4:
+                _i++;
+                return [3 /*break*/, 2];
+            case 5:
+                // Only broadcast if there are non-manual updates
+                if (Object.keys(updatedTimes).length > 0) {
+                    updateMessage_1 = JSON.stringify({
+                        type: 'TRAVEL_TIME_UPDATE',
+                        travelTimes: updatedTimes,
+                        orders: orders
+                    });
+                    clients.forEach(function (client) {
+                        if (client.readyState === ws_1.WebSocket.OPEN) {
+                            client.send(updateMessage_1);
+                        }
+                    });
                 }
-                data = yield response.json();
-                if (data.rows?.[0]?.elements?.[0]?.status === 'OK') {
-                    duration = data.rows[0].elements[0].duration.text;
-                    minutes = parseInt(duration.split(' ')[0]);
-                    return [2 /*return*/, isNaN(minutes) ? null : minutes];
-                }
-                return [2 /*return*/, null];
-            }
-            catch (error) {
-                console.warn("Error calculating travel time:", error);
-                return [2 /*return*/, null];
-            }
-        });
+                return [2 /*return*/];
+        }
     });
-};
+}); };
+// Set up periodic travel time updates
+updateIntervalRef = setInterval(updateAllTravelTimes, UPDATE_INTERVAL);
+// Create WebSocket server
+var wss = new ws_1.WebSocketServer({ port: wsPort });
+console.log('WebSocket server starting on port '.concat(wsPort));
 wss.on('connection', function (ws) {
-    ws.isAlive = true;
+    console.log('Client connected to WebSocket server');
     clients.add(ws);
-    console.log('Client connected');
-    // Send initial data to new client
-    ws.send(JSON.stringify({
-        type: 'INIT',
-        orders: orders.map(function (order) { return (__assign(__assign({}, order), { dispatchTime: calculateDispatchTime(order.deliveryTime, order.travelTime) })); }),
+    // Send initial data to client
+    var initialData = JSON.stringify({
+        type: 'INITIAL_DATA',
+        orders: orders,
         drivers: drivers,
         productList: productList
-    }));
-    ws.on('pong', function () {
-        ws.isAlive = true;
     });
-    ws.on('message', async (message) => {
-        try {
-            const data = JSON.parse(message.toString());
-            
-            switch (data.type) {
-                case 'TRAVEL_TIME_UPDATE':
-                    const { address, duration } = data;
-                    const minutes = parseInt(duration.split(' ')[0]);
-                    
-                    if (!isNaN(minutes)) {
-                        // Update travel time for all orders with matching address
-                        const updatedOrders = orders.map(order => {
-                            if (formatAddress(parseAddress(order.address)) === address) {
-                                return {
-                                    ...order,
-                                    travelTime: minutes,
-                                    dispatchTime: calculateDispatchTime(order.deliveryTime, minutes)
-                                };
-                            }
-                            return order;
-                        });
-
-                        orders = updatedOrders;
-
-                        // Broadcast updates
-                        const travelTimeUpdate = JSON.stringify({
-                            type: 'ORDERS_UPDATE',
-                            orders: updatedOrders
-                        });
-
-                        clients.forEach(client => {
-                            if (client.readyState === ws_1.WebSocket.OPEN) {
-                                client.send(travelTimeUpdate);
-                            }
-                        });
-                    }
-                    break;
-
-                case 'ORDER_UPDATE':
-                    const { orderId, updates } = data;
-                    const orderIndex = orders.findIndex(o => o.id === orderId);
-                    
+    ws.send(initialData);
+    ws.on('message', function (message) { return __awaiter(void 0, void 0, void 0, function () {
+        var data, orderId_1, updates, orderIndex, updateMessage_2;
+        return __generator(this, function (_a) {
+            try {
+                data = JSON.parse(message.toString());
+                console.log('Received message:', data);
+                if (data.type === 'ORDER_UPDATE') {
+                    orderId_1 = data.orderId, updates = data.updates;
+                    console.log('Processing order update for:', orderId_1, updates);
+                    orderIndex = orders.findIndex(function (o) { return o.id === orderId_1; });
                     if (orderIndex !== -1) {
-                        orders[orderIndex] = {
-                            ...orders[orderIndex],
-                            ...updates,
-                            dispatchTime: calculateDispatchTime(
-                                updates.deliveryTime || orders[orderIndex].deliveryTime,
-                                updates.travelTime || orders[orderIndex].travelTime
-                            )
-                        };
-
-                        // Broadcast update to all clients
-                        const updateMessage = JSON.stringify({
+                        orders[orderIndex] = __assign(__assign({}, orders[orderIndex]), updates);
+                        // Save updated orders to file
+                        saveOrders();
+                        updateMessage_2 = JSON.stringify({
                             type: 'ORDER_UPDATE',
                             order: orders[orderIndex]
                         });
-                        
-                        clients.forEach(client => {
+                        clients.forEach(function (client) {
                             if (client.readyState === ws_1.WebSocket.OPEN) {
-                                client.send(updateMessage);
+                                client.send(updateMessage_2);
                             }
                         });
                     }
-                    break;
-
-                case 'FETCH_ORDERS':
-                    // Send current orders to requesting client
-                    ws.send(JSON.stringify({
-                        type: 'ORDERS_UPDATE',
-                        orders: orders.map(function (order) { return (__assign(__assign({}, order), { dispatchTime: calculateDispatchTime(order.deliveryTime, order.travelTime) })); })
-                    }));
-                    break;
-                case 'FETCH_DRIVERS':
-                    ws.send(JSON.stringify({
-                        type: 'DRIVERS_UPDATE',
-                        drivers: drivers
-                    }));
-                    break;
-                case 'FETCH_PRODUCT_LIST':
-                    ws.send(JSON.stringify({
-                        type: 'PRODUCT_LIST_UPDATE',
-                        productList: productList
-                    }));
-                    break;
-            }
-        }
-        catch (error) {
-            console.error('Error processing message:', error);
-        }
-    });
-    ws.on('close', function () {
-        clients.delete(ws);
-        console.log('Client disconnected');
-    });
-});
-// Ping clients every 30 seconds to keep connections alive
-var interval = setInterval(function () {
-    clients.forEach(function (ws) {
-        if (ws.isAlive === false) {
-            clients.delete(ws);
-            return ws.terminate();
-        }
-        ws.isAlive = false;
-        ws.ping();
-    });
-}, 30000);
-// Broadcast endpoint
-app.post('/broadcast', function (req, res) {
-    var data = req.body;
-    // Handle different types of broadcasts
-    switch (data.type) {
-        case 'NEW_ORDER':
-            // Calculate initial travel time for new orders
-            calculateTravelTime(data.order.address).then(function (travelTime) {
-                if (travelTime !== null) {
-                    var newOrder = __assign(__assign({}, data.order), { travelTime: travelTime, isManualTravelTime: false, dispatchTime: calculateDispatchTime(data.order.deliveryTime, travelTime) });
-                    orders.push(newOrder);
                 }
-            });
-            break;
-        case 'ORDER_UPDATE':
-            var orderIndex = orders.findIndex(function (o) { return o.id === data.orderId; });
-            if (orderIndex !== -1) {
-                // If travel time is being updated manually, set isManualTravelTime flag
-                var isManualUpdate = data.updates.hasOwnProperty('travelTime');
-                orders[orderIndex] = __assign(__assign(__assign({}, orders[orderIndex]), data.updates), { isManualTravelTime: isManualUpdate ? true : orders[orderIndex].isManualTravelTime, dispatchTime: calculateDispatchTime(data.updates.deliveryTime || orders[orderIndex].deliveryTime, data.updates.travelTime || orders[orderIndex].travelTime) });
             }
-            break;
-        case 'DRIVERS_UPDATE':
-            drivers = data.drivers;
-            break;
-        case 'PRODUCT_LIST_UPDATE':
-            productList = data.productList;
-            break;
-    }
-    // Broadcast to all connected clients
-    var message = JSON.stringify(data);
-    clients.forEach(function (client) {
-        if (client.readyState === ws_1.WebSocket.OPEN) {
-            client.send(message);
-        }
+            catch (error) {
+                console.error('Error processing message:', error);
+            }
+            return [2 /*return*/];
+        });
+    }); });
+    ws.on('close', function () {
+        console.log('Client disconnected from WebSocket server');
+        clients.delete(ws);
     });
-    res.json({ success: true });
 });
 // API endpoints
-app.get('/api/orders', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    return __generator(this, function (_a) {
-        res.json(orders.map(function (order) { return (__assign(__assign({}, order), { dispatchTime: calculateDispatchTime(order.deliveryTime, order.travelTime) })); }));
-        return [2 /*return*/];
-    });
-}); });
-app.get('/api/drivers', function (req, res) {
-    res.json(drivers);
+app.get('/api/orders', function (req, res) {
+    res.json(orders);
 });
-app.get('/api/product-list', function (req, res) {
-    res.json(productList);
+app.get('/api/stock', async (req, res) => {
+    try {
+        const stockItems = await prisma.stockItem.findMany();
+        res.json(stockItems);
+    }
+    catch (error) {
+        console.error('Error fetching stock items:', error);
+        res.status(500).json({ error: 'Failed to fetch stock items' });
+    }
 });
-wss.on('listening', function () {
-    console.log('WebSocket server running on port 3002');
+app.get('/api/product-list', async (req, res) => {
+    try {
+        const stockItems = await prisma.stockItem.findMany();
+        res.json(stockItems);
+    }
+    catch (error) {
+        console.error('Error fetching product list:', error);
+        res.status(500).json({ error: 'Failed to fetch product list' });
+    }
 });
-app.listen(port, function () {
-    console.log("HTTP server running on port ".concat(port));
+app.get('/api/drivers', async (req, res) => {
+    try {
+        const allDrivers = await prisma.driver.findMany();
+        res.json(allDrivers);
+    }
+    catch (error) {
+        console.error('Error fetching drivers:', error);
+        res.status(500).json({ error: 'Failed to fetch drivers' });
+    }
+});
+app.listen(httpPort, function () {
+    console.log("Express server running on port ".concat(httpPort));
+    console.log("WebSocket server running on port ".concat(wsPort));
 });
 // Clean up on server close
 wss.on('close', function () {
-    clearInterval(interval);
+    if (updateIntervalRef) {
+        clearInterval(updateIntervalRef);
+    }
+});
+// Handle server shutdown
+process.on('SIGINT', function () {
+    console.log('Shutting down WebSocket server...');
+    wss.close(function () {
+        console.log('WebSocket server closed');
+        process.exit(0);
+    });
 });

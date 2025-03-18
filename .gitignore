@@ -37,3 +37,27 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# database
+*.sqlite
+*.sqlite3
+/prisma/*.db
+
+# logs
+*.log
+logs/
+
+# API keys and secrets
+.env*.local
+google-credentials.json
+shopify-credentials.json
+
+# Local data files
+orders.json
+/data/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo

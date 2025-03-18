@@ -8,25 +8,25 @@ datasource db {
 }
 
 model Order {
-  id              String      @id @default(cuid())
-  shopifyId       String      @unique
-  orderNumber     String
-  customerName    String
-  customerEmail   String
-  phone           String?
-  address         String?
-  status          OrderStatus @default(PENDING)
-  totalAmount     Float
-  orderDate       DateTime
-  deliveryTime    DateTime?
-  travelTime      Int?        // in minutes
-  isManualTravelTime Boolean  @default(false)
-  note            String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  driver          Driver?     @relation(fields: [driverId], references: [id])
-  driverId        String?
-  items           OrderItem[]
+  id                 String      @id @default(cuid())
+  shopifyId          String      @unique
+  orderNumber        String
+  customerName       String
+  customerEmail      String
+  phone              String?
+  address            String?
+  status            OrderStatus  @default(PENDING)
+  totalAmount        Float
+  orderDate          DateTime
+  deliveryTime       DateTime?
+  travelTime         Int?        // in minutes
+  isManualTravelTime Boolean     @default(false)
+  note               String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  driver             Driver?     @relation(fields: [driverId], references: [id])
+  driverId           String?
+  items              OrderItem[]
 }
 
 model OrderItem {
@@ -41,72 +41,84 @@ model OrderItem {
 }
 
 model Product {
-  id          String             @id @default(cuid())
+  id          String      @id @default(cuid())
   name        String
   description String?
   price       Float
   category    String?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
   sku         String?
   orderItems  OrderItem[]
-  stockItems  ProductStockItem[]
 }
 
 model StockItem {
-  id          String                @id @default(cuid())
-  name        String                @unique
-  description String?
-  createdAt   DateTime              @default(now())
-  updatedAt   DateTime              @updatedAt
-  products    ProductStockItem[]
-  ingredients StockItemIngredient[]
+  id        String         @id @default(cuid())
+  name      String
+  totalCost Float
+  subItems  StockSubItem[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 }
 
-model StockItemIngredient {
-  id           String     @id @default(cuid())
-  stockItemId  String
-  ingredientId String
-  quantity     Float
-  unit         String
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
-  stockItem    StockItem  @relation(fields: [stockItemId], references: [id])
-}
-
-model ProductStockItem {
+model StockSubItem {
   id          String    @id @default(cuid())
   productId   String
-  stockItemId String
+  productName String
+  price       Float
   quantity    Float
   unit        String
+  source      String
+  stockItem   StockItem @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+  stockItemId String
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  product     Product   @relation(fields: [productId], references: [id])
-  stockItem   StockItem @relation(fields: [stockItemId], references: [id])
 }
 
-model Ingredient {
-  id          String                @id @default(cuid())
-  name        String
-  unit        String
-  createdAt   DateTime              @default(now())
-  lastUpdated DateTime              @updatedAt
-  price       Float
-  sku         String?               @unique
-  supplierId  String
-  supplier    Supplier              @relation(fields: [supplierId], references: [id])
-  stockItems  StockItemIngredient[]
+model GilmoursItem {
+  id                String   @id @default(cuid())
+  purchaseDate     String
+  sku              String
+  brand            String
+  productDescription String
+  packSize         String
+  uom              String
+  price            String
+  qty              String
+  accountName      String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([sku])
 }
 
-model Supplier {
-  id          String       @id @default(cuid())
-  name        String
-  type        SupplierType
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  ingredients Ingredient[]
+model BidfoodItem {
+  id            String   @id @default(cuid())
+  productCode   String
+  brand         String
+  description   String
+  packSize      String
+  ctnQty        String
+  uom           String
+  qty           String
+  lastPricePaid String
+  totalExGst    String
+  account       String
+  contains      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([productCode])
+}
+
+model OtherItem {
+  id           String   @id @default(cuid())
+  sku          String   @unique
+  productName  String
+  supplier     String
+  pricePerUnit Float
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model ProductList {
@@ -141,32 +153,30 @@ model Staff {
   id          String   @id @default(cuid())
   firstName   String
   lastName    String
-  dateOfBirth DateTime
-  address     String
   email       String   @unique
   phoneNumber String
+  address     String
+  dateOfBirth DateTime
   payRate     Float
   isDriver    Boolean  @default(false)
   isAdmin     Boolean  @default(false)
   password    String?
-  shifts      Shift[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  shifts      Shift[]
 }
 
 model Shift {
   id        String   @id @default(cuid())
-  staffId   String
-  staff     Staff    @relation(fields: [staffId], references: [id])
-  date      DateTime
-  clockIn   DateTime
-  clockOut  DateTime?
+  startTime DateTime
+  endTime   DateTime?
   notes     String?
+  staff     Staff    @relation(fields: [staffId], references: [id])
+  staffId   String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([staffId])
-  @@index([date])
 }
 
 enum OrderStatus {

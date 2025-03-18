@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { sendStaffInvitation } from '@/lib/email';
 
 export async function GET() {
   try {
@@ -31,7 +32,6 @@ export async function POST(request: Request) {
       payRate,
       isDriver,
       isAdmin,
-      password,
     } = data;
 
     const existingStaff = await prisma.staff.findUnique({
@@ -45,6 +45,8 @@ export async function POST(request: Request) {
       );
     }
 
+    const temporaryPassword = 'Cater562';
+
     const staff = await prisma.staff.create({
       data: {
         firstName,
@@ -56,9 +58,21 @@ export async function POST(request: Request) {
         payRate: parseFloat(payRate),
         isDriver: Boolean(isDriver),
         isAdmin: Boolean(isAdmin),
-        password,
+        password: temporaryPassword,
       },
     });
+
+    // Send invitation email
+    const emailSent = await sendStaffInvitation(
+      email,
+      firstName,
+      lastName,
+      temporaryPassword
+    );
+
+    if (!emailSent) {
+      console.warn('Failed to send invitation email to:', email);
+    }
 
     console.log('Created staff:', { ...staff, password: '[REDACTED]' });
     return NextResponse.json(staff);
